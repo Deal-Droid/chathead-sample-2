@@ -1,15 +1,40 @@
+/* Light mode (default) */
 :root{
   --bg:#fafafa;
   --fg:#111;
   --accent:#06c;
   --dot-size:6px; /* base size, scaled in JS */
   --dot-color:rgba(0,0,0,0.12);
+  --dot-color-static: 0,0,0; /* RGB values for JavaScript */
   --aurora-deep-blue: rgba(20, 50, 120, 0.6);
   --aurora-electric-blue: rgba(0, 150, 255, 0.7);
   --aurora-cyan: rgba(0, 255, 255, 0.8);
   --aurora-green: rgba(100, 255, 200, 0.8);
   --aurora-purple: rgba(200, 100, 255, 0.9);
   --text-color:#111;
+  --card-bg: rgba(255,255,255,0.6);
+  --card-shadow: rgba(20,20,20,0.08);
+  --lead-color: rgba(0,0,0,0.55);
+}
+
+/* Dark mode */
+@media (prefers-color-scheme: dark) {
+  :root{
+    --bg:#0a0a0a;
+    --fg:#ffffff;
+    --accent:#40a6ff;
+    --dot-color:rgba(255,255,255,0.08);
+    --dot-color-static: 255,255,255; /* RGB values for JavaScript */
+    --aurora-deep-blue: rgba(60, 120, 200, 0.8);
+    --aurora-electric-blue: rgba(100, 200, 255, 0.9);
+    --aurora-cyan: rgba(150, 255, 255, 0.9);
+    --aurora-green: rgba(180, 255, 220, 0.9);
+    --aurora-purple: rgba(220, 150, 255, 0.95);
+    --text-color:#ffffff;
+    --card-bg: rgba(20,20,20,0.7);
+    --card-shadow: rgba(0,0,0,0.3);
+    --lead-color: rgba(255,255,255,0.7);
+  }
 }
 html,body{height:100%;}
 body{
@@ -51,18 +76,18 @@ h1{
 }
 p.lead{
   margin:0;
-  color:rgba(0,0,0,0.55);
+  color:var(--lead-color);
   font-size:18px;
 }
 
 /* subtle backdrop to mimic Apple style */
 .card{
   display:inline-block;
-  background:rgba(255,255,255,0.6);
+  background:var(--card-bg);
   backdrop-filter: blur(6px) saturate(120%);
   padding:36px 48px;
   border-radius:16px;
-  box-shadow:0 8px 30px rgba(20,20,20,0.08);
+  box-shadow:0 8px 30px var(--card-shadow);
 }
 
 /* small helper for mobile spacing */

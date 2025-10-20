@@ -18,6 +18,11 @@
   // active waves generated on mousemove
   const waves = []; // {x,y,created,t0,power,speed,sigma}
 
+  // Dark mode detection
+  const isDarkMode = () =>
+    window.matchMedia &&
+    window.matchMedia("(prefers-color-scheme: dark)").matches;
+
   function resize() {
     DPR = Math.min(window.devicePixelRatio || 1, 2);
     width = Math.floor(window.innerWidth);
@@ -130,45 +135,83 @@
       ctx.arc(drawX, drawY, radius, 0, Math.PI * 2);
 
       // Aurora color transition based on influence
+      const darkMode = isDarkMode();
+
       if (influence < 0.1) {
-        // Static dots - use original gray color
-        ctx.fillStyle = `rgba(0,0,0,${0.08 + influence * 0.16})`;
+        // Static dots - adapt to theme
+        if (darkMode) {
+          ctx.fillStyle = `rgba(255,255,255,${0.06 + influence * 0.12})`;
+        } else {
+          ctx.fillStyle = `rgba(0,0,0,${0.08 + influence * 0.16})`;
+        }
       } else {
-        // Animated dots - aurora gradient colors
+        // Animated dots - aurora gradient colors (enhanced for dark mode)
         const normalizedInfluence = influence;
 
         if (normalizedInfluence < 0.25) {
           // Deep blue to electric blue
           const t = normalizedInfluence / 0.25;
-          const r = Math.round(20 + (0 - 20) * t);
-          const g = Math.round(50 + (150 - 50) * t);
-          const b = Math.round(120 + (255 - 120) * t);
-          const alpha = 0.5 + normalizedInfluence * 0.3;
-          ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
+          if (darkMode) {
+            const r = Math.round(60 + (100 - 60) * t);
+            const g = Math.round(120 + (200 - 120) * t);
+            const b = Math.round(200 + (255 - 200) * t);
+            const alpha = 0.6 + normalizedInfluence * 0.3;
+            ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
+          } else {
+            const r = Math.round(20 + (0 - 20) * t);
+            const g = Math.round(50 + (150 - 50) * t);
+            const b = Math.round(120 + (255 - 120) * t);
+            const alpha = 0.5 + normalizedInfluence * 0.3;
+            ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
+          }
         } else if (normalizedInfluence < 0.5) {
           // Electric blue to cyan
           const t = (normalizedInfluence - 0.25) / 0.25;
-          const r = Math.round(0 + (0 - 0) * t);
-          const g = Math.round(150 + (255 - 150) * t);
-          const b = 255;
-          const alpha = 0.6 + normalizedInfluence * 0.2;
-          ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
+          if (darkMode) {
+            const r = Math.round(100 + (150 - 100) * t);
+            const g = Math.round(200 + (255 - 200) * t);
+            const b = 255;
+            const alpha = 0.7 + normalizedInfluence * 0.2;
+            ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
+          } else {
+            const r = Math.round(0 + (0 - 0) * t);
+            const g = Math.round(150 + (255 - 150) * t);
+            const b = 255;
+            const alpha = 0.6 + normalizedInfluence * 0.2;
+            ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
+          }
         } else if (normalizedInfluence < 0.75) {
           // Cyan to green aurora
           const t = (normalizedInfluence - 0.5) / 0.25;
-          const r = Math.round(0 + (100 - 0) * t);
-          const g = 255;
-          const b = Math.round(255 + (200 - 255) * t);
-          const alpha = 0.7 + normalizedInfluence * 0.2;
-          ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
+          if (darkMode) {
+            const r = Math.round(150 + (180 - 150) * t);
+            const g = 255;
+            const b = Math.round(255 + (220 - 255) * t);
+            const alpha = 0.8 + normalizedInfluence * 0.15;
+            ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
+          } else {
+            const r = Math.round(0 + (100 - 0) * t);
+            const g = 255;
+            const b = Math.round(255 + (200 - 255) * t);
+            const alpha = 0.7 + normalizedInfluence * 0.2;
+            ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
+          }
         } else {
           // Green to purple aurora (highest intensity)
           const t = (normalizedInfluence - 0.75) / 0.25;
-          const r = Math.round(100 + (200 - 100) * t);
-          const g = Math.round(255 + (100 - 255) * t);
-          const b = Math.round(200 + (255 - 200) * t);
-          const alpha = 0.8 + normalizedInfluence * 0.2;
-          ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
+          if (darkMode) {
+            const r = Math.round(180 + (220 - 180) * t);
+            const g = Math.round(255 + (150 - 255) * t);
+            const b = Math.round(220 + (255 - 220) * t);
+            const alpha = 0.85 + normalizedInfluence * 0.15;
+            ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
+          } else {
+            const r = Math.round(100 + (200 - 100) * t);
+            const g = Math.round(255 + (100 - 255) * t);
+            const b = Math.round(200 + (255 - 200) * t);
+            const alpha = 0.8 + normalizedInfluence * 0.2;
+            ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
+          }
         }
       }
 
@@ -196,6 +239,13 @@
     resizeTimer = setTimeout(resize, 120);
   });
 
+  // Listen for theme changes
+  const darkModeMediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+  darkModeMediaQuery.addEventListener("change", () => {
+    // Redraw when theme changes for immediate visual update
+    requestAnimationFrame(draw);
+  });
+
   // expose simple API for customization (optional)
   window._dotGridBG = {
     pushWave,
@@ -206,5 +256,6 @@
     setDotRadius(r) {
       dotRadius = r;
     },
+    isDarkMode,
   };
 })();
