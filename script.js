@@ -128,7 +128,7 @@
 
       ctx.beginPath();
       ctx.arc(drawX, drawY, radius, 0, Math.PI * 2);
-      
+
       // Aurora color transition based on influence
       if (influence < 0.1) {
         // Static dots - use original gray color
@@ -136,7 +136,7 @@
       } else {
         // Animated dots - aurora gradient colors
         const normalizedInfluence = influence;
-        
+
         if (normalizedInfluence < 0.25) {
           // Deep blue to electric blue
           const t = normalizedInfluence / 0.25;
@@ -171,7 +171,7 @@
           ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
         }
       }
-      
+
       ctx.fill();
     }
 
