@@ -4,6 +4,11 @@
   --accent:#06c;
   --dot-size:6px; /* base size, scaled in JS */
   --dot-color:rgba(0,0,0,0.12);
+  --aurora-deep-blue: rgba(20, 50, 120, 0.6);
+  --aurora-electric-blue: rgba(0, 150, 255, 0.7);
+  --aurora-cyan: rgba(0, 255, 255, 0.8);
+  --aurora-green: rgba(100, 255, 200, 0.8);
+  --aurora-purple: rgba(200, 100, 255, 0.9);
   --text-color:#111;
 }
 html,body{height:100%;}
