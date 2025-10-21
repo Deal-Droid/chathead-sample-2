@@ -54,31 +54,68 @@
     }
   }
 
-  // create a wave on pointer
+  // create a wave on pointer with improved stability
   function pushWave(x, y, power = 1) {
     waves.push({
       x,
       y,
       created: performance.now(),
-      power: power,
-      speed: 0.9 + Math.random() * 0.6,
-      sigma: spacing * 0.65,
+      power: Math.max(0.5, Math.min(1.5, power)), // Clamp power for consistency
+      speed: 1.0 + Math.random() * 0.4, // Reduced randomness for smoother waves
+      sigma: spacing * 0.7, // Slightly larger sigma for smoother transitions
     });
-    // keep waves short
-    if (waves.length > 8) waves.shift();
+    // keep waves manageable but allow for smoother overlaps
+    if (waves.length > 10) waves.shift();
   }
 
-  // pointer handlers
+  // pointer handlers with smooth movement tracking
   let lastMove = 0;
+  let lastMouseX = 0;
+  let lastMouseY = 0;
+  let smoothMouseX = 0;
+  let smoothMouseY = 0;
+  let mouseMoving = false;
+  let moveTimeout = null;
+
   window.addEventListener(
     "pointermove",
     (e) => {
       const now = performance.now();
-      // throttle creation so it doesn't flood
-      if (now - lastMove > 40) {
-        pushWave(e.clientX, e.clientY, 1.0);
+
+      // Calculate mouse velocity for adaptive behavior
+      const deltaX = e.clientX - lastMouseX;
+      const deltaY = e.clientY - lastMouseY;
+      const velocity = Math.hypot(deltaX, deltaY);
+
+      // Update smooth mouse position with interpolation
+      const lerpFactor = 0.3; // Smoothing factor (0 = no smoothing, 1 = instant)
+      smoothMouseX += (e.clientX - smoothMouseX) * lerpFactor;
+      smoothMouseY += (e.clientY - smoothMouseY) * lerpFactor;
+
+      // Adaptive throttling based on velocity
+      const baseThrottle = 35;
+      const velocityThrottle = Math.max(15, baseThrottle - velocity * 0.5);
+
+      // Create waves more consistently, especially for slow movements
+      if (now - lastMove > velocityThrottle) {
+        // Use smoothed position for more stable waves
+        pushWave(
+          smoothMouseX,
+          smoothMouseY,
+          Math.min(1.2, 0.7 + velocity * 0.01)
+        );
         lastMove = now;
       }
+
+      // Track movement state
+      mouseMoving = true;
+      clearTimeout(moveTimeout);
+      moveTimeout = setTimeout(() => {
+        mouseMoving = false;
+      }, 100);
+
+      lastMouseX = e.clientX;
+      lastMouseY = e.clientY;
     },
     { passive: true }
   );
@@ -100,7 +137,7 @@
       let dx = 0,
         dy = 0;
 
-      // accumulate contribution from each wave
+      // accumulate contribution from each wave with improved stability
       for (let j = 0; j < waves.length; j++) {
         const w = waves[j];
         const age = (tNow - w.created) / 1000; // seconds
@@ -108,7 +145,7 @@
 
         const dist = Math.hypot(p.ox - w.x, p.oy - w.y);
 
-        // gaussian ring centered at radius r
+        // gaussian ring centered at radius r with smoother falloff
         const diff = dist - r;
         const gaussian = Math.exp(-(diff * diff) / (2 * (w.sigma * w.sigma)));
 
@@ -116,16 +153,35 @@
         if (dist > 0.0001) {
           const nx = (p.ox - w.x) / dist;
           const ny = (p.oy - w.y) / dist;
-          const strength = w.power * gaussian * (1 / (1 + age * 2));
-          dx += nx * strength * 18; // scale factor
-          dy += ny * strength * 10;
+
+          // Improved strength calculation with smoother decay
+          const ageDecay = Math.pow(1 / (1 + age * 1.5), 2); // Smoother decay curve
+          const strength = w.power * gaussian * ageDecay;
+
+          // Reduced scale factors and added subtle damping for stability
+          const dampingFactor = 0.85; // Reduces jitter
+          dx += nx * strength * 15 * dampingFactor; // Reduced from 18
+          dy += ny * strength * 8 * dampingFactor; // Reduced from 10
         }
       }
 
-      // subtle return easing to original (when no waves)
-      // (we are not mutating ox/oy; ox/oy are base positions)
-      const drawX = p.ox + dx;
-      const drawY = p.oy + dy;
+      // Store previous position for smoothing (initialize if needed)
+      if (p.prevX === undefined) {
+        p.prevX = p.ox;
+        p.prevY = p.oy;
+      }
+
+      // Calculate target position
+      const targetX = p.ox + dx;
+      const targetY = p.oy + dy;
+
+      // Smooth interpolation to prevent micro-jitters
+      const smoothFactor = 0.7; // Higher = more responsive, lower = smoother
+      p.prevX += (targetX - p.prevX) * smoothFactor;
+      p.prevY += (targetY - p.prevY) * smoothFactor;
+
+      const drawX = p.prevX;
+      const drawY = p.prevY;
 
       // size modulation by cumulative influence (optional)
       const influence = Math.min(1, Math.hypot(dx, dy) / 6);
@@ -197,18 +253,18 @@
             ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
           }
         } else {
-          // Green to purple aurora (highest intensity)
+          // Green to golden orange aurora (highest intensity)
           const t = (normalizedInfluence - 0.75) / 0.25;
           if (darkMode) {
-            const r = Math.round(180 + (220 - 180) * t);
-            const g = Math.round(255 + (150 - 255) * t);
-            const b = Math.round(220 + (255 - 220) * t);
+            const r = Math.round(180 + (255 - 180) * t);
+            const g = Math.round(255 + (180 - 255) * t);
+            const b = Math.round(220 + (50 - 220) * t);
             const alpha = 0.85 + normalizedInfluence * 0.15;
             ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
           } else {
-            const r = Math.round(100 + (200 - 100) * t);
-            const g = Math.round(255 + (100 - 255) * t);
-            const b = Math.round(200 + (255 - 200) * t);
+            const r = Math.round(100 + (255 - 100) * t);
+            const g = Math.round(255 + (140 - 255) * t);
+            const b = Math.round(200 + (0 - 200) * t);
             const alpha = 0.8 + normalizedInfluence * 0.2;
             ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
           }
@@ -218,11 +274,15 @@
       ctx.fill();
     }
 
-    // decay old waves
+    // decay old waves with smoother cleanup
     for (let k = waves.length - 1; k >= 0; k--) {
       const w = waves[k];
       const age = (tNow - w.created) / 1000;
-      if (age > 2.4) waves.splice(k, 1);
+
+      // Longer lifetime for smoother transitions
+      if (age > 2.8) {
+        waves.splice(k, 1);
+      }
     }
 
     requestAnimationFrame(draw);
