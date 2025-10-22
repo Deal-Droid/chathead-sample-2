@@ -359,6 +359,73 @@
     requestAnimationFrame(draw);
   });
 
+  // Additional Safari iOS scroll prevention
+  // Prevent document scrolling and overscroll bounce
+  function preventScrolling(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    return false;
+  }
+
+  // Prevent all scrolling on the document for touch devices
+  if (isTouchDevice) {
+    // Prevent default touch behaviors on the entire document
+    document.addEventListener("touchstart", preventScrolling, {
+      passive: false,
+    });
+    document.addEventListener("touchmove", preventScrolling, {
+      passive: false,
+    });
+    document.addEventListener("touchend", preventScrolling, { passive: false });
+
+    // Additional prevention for specific iOS Safari issues
+    document.addEventListener("gesturestart", preventScrolling, {
+      passive: false,
+    });
+    document.addEventListener("gesturechange", preventScrolling, {
+      passive: false,
+    });
+    document.addEventListener("gestureend", preventScrolling, {
+      passive: false,
+    });
+
+    // Prevent body scrolling
+    document.body.addEventListener("touchstart", preventScrolling, {
+      passive: false,
+    });
+    document.body.addEventListener("touchmove", preventScrolling, {
+      passive: false,
+    });
+    document.body.addEventListener("touchend", preventScrolling, {
+      passive: false,
+    });
+
+    // Prevent window scroll events
+    window.addEventListener(
+      "scroll",
+      (e) => {
+        window.scrollTo(0, 0);
+        e.preventDefault();
+      },
+      { passive: false }
+    );
+
+    // Set viewport meta tag to prevent zooming and improve touch handling
+    let viewport = document.querySelector('meta[name="viewport"]');
+    if (viewport) {
+      viewport.setAttribute(
+        "content",
+        "width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, shrink-to-fit=no"
+      );
+    } else {
+      viewport = document.createElement("meta");
+      viewport.name = "viewport";
+      viewport.content =
+        "width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, shrink-to-fit=no";
+      document.head.appendChild(viewport);
+    }
+  }
+
   // expose simple API for customization (optional)
   window._dotGridBG = {
     pushWave,
