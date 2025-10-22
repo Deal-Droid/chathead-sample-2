@@ -3,6 +3,16 @@
   const canvas = document.getElementById("bgCanvas");
   const ctx = canvas.getContext("2d");
 
+  // Performance monitoring
+  const perf = {
+    frameCount: 0,
+    lastTime: performance.now(),
+    fps: 0,
+    frameTime: 0,
+    mathOps: 0,
+    startTime: performance.now(),
+  };
+
   let DPR = Math.min(window.devicePixelRatio || 1, 2);
   let width = 0,
     height = 0;
@@ -15,8 +25,70 @@
     rows = 0;
   let points = [];
 
-  // active waves generated on mousemove
-  const waves = []; // {x,y,created,t0,power,speed,sigma}
+  // OPTIMIZATION: Pre-computed lookup tables
+  const EXP_TABLE_SIZE = 2048;
+  const EXP_TABLE_MAX = 8.0;
+  const expLookup = new Float32Array(EXP_TABLE_SIZE);
+  for (let i = 0; i < EXP_TABLE_SIZE; i++) {
+    const x = (i / EXP_TABLE_SIZE) * EXP_TABLE_MAX;
+    expLookup[i] = Math.exp(-x);
+  }
+
+  // Fast approximation of Math.exp(-x) using lookup table
+  function fastExp(x) {
+    if (x <= 0) return 1;
+    if (x >= EXP_TABLE_MAX) return 0;
+    const index = Math.floor((x / EXP_TABLE_MAX) * EXP_TABLE_SIZE);
+    return expLookup[Math.min(index, EXP_TABLE_SIZE - 1)];
+  }
+
+  // OPTIMIZATION: Object pooling for waves
+  const WAVE_POOL_SIZE = 20;
+  const wavePool = [];
+  const activeWaves = [];
+
+  // Initialize wave pool
+  for (let i = 0; i < WAVE_POOL_SIZE; i++) {
+    wavePool.push({
+      x: 0,
+      y: 0,
+      created: 0,
+      power: 0,
+      speed: 0,
+      sigma: 0,
+      inUse: false,
+    });
+  }
+
+  // Get wave from pool
+  function getWave(x, y, power, speed, sigma) {
+    let wave = wavePool.find((w) => !w.inUse);
+    if (!wave) {
+      // If pool exhausted, reuse oldest active wave
+      wave = activeWaves.shift();
+      if (!wave) return null;
+    }
+
+    wave.x = x;
+    wave.y = y;
+    wave.created = performance.now();
+    wave.power = power;
+    wave.speed = speed;
+    wave.sigma = sigma;
+    wave.inUse = true;
+
+    activeWaves.push(wave);
+    return wave;
+  }
+
+  // Return wave to pool
+  function returnWave(wave) {
+    wave.inUse = false;
+    const index = activeWaves.indexOf(wave);
+    if (index > -1) {
+      activeWaves.splice(index, 1);
+    }
+  }
 
   // Dark mode detection
   const isDarkMode = () =>
@@ -54,18 +126,20 @@
     }
   }
 
-  // create a wave on pointer with improved stability
+  // OPTIMIZATION: Optimized wave creation with pooling
   function pushWave(x, y, power = 1) {
-    waves.push({
-      x,
-      y,
-      created: performance.now(),
-      power: Math.max(0.5, Math.min(1.5, power)), // Clamp power for consistency
-      speed: 1.0 + Math.random() * 0.4, // Reduced randomness for smoother waves
-      sigma: spacing * 0.7, // Slightly larger sigma for smoother transitions
-    });
-    // keep waves manageable but allow for smoother overlaps
-    if (waves.length > 10) waves.shift();
+    const clampedPower = Math.max(0.5, Math.min(1.5, power));
+    const speed = 1.0 + Math.random() * 0.4;
+    const sigma = spacing * 0.7;
+
+    const wave = getWave(x, y, clampedPower, speed, sigma);
+    if (!wave) return; // Pool exhausted, skip this wave
+
+    // Clean up old waves efficiently
+    if (activeWaves.length > 10) {
+      const oldWave = activeWaves[0];
+      returnWave(oldWave);
+    }
   }
 
   // pointer handlers with smooth movement tracking
@@ -178,163 +252,206 @@
     );
   }
 
-  // main draw loop
+  // OPTIMIZATION: Highly optimized main draw loop
   function draw() {
+    const frameStart = performance.now();
     ctx.clearRect(0, 0, width, height);
 
     const tNow = performance.now();
+    perf.mathOps = 0;
 
-    // draw dots
-    for (let i = 0; i < points.length; i++) {
-      const p = points[i];
-      let dx = 0,
-        dy = 0;
+    // Pre-calculate common values
+    const pointsLength = points.length;
+    const wavesLength = activeWaves.length;
 
-      // accumulate contribution from each wave with improved stability
-      for (let j = 0; j < waves.length; j++) {
-        const w = waves[j];
-        const age = (tNow - w.created) / 1000; // seconds
-        const r = age * (w.speed * 400); // radius expansion in px (speed * scale)
+    // OPTIMIZATION: Early exit if no waves
+    if (wavesLength === 0) {
+      // Draw static dots only
+      for (let i = 0; i < pointsLength; i++) {
+        const p = points[i];
+        ctx.beginPath();
+        ctx.arc(p.ox, p.oy, dotRadius, 0, Math.PI * 2);
 
-        const dist = Math.hypot(p.ox - w.x, p.oy - w.y);
+        const darkMode = isDarkMode();
+        ctx.fillStyle = darkMode
+          ? "rgba(255,255,255,0.06)"
+          : "rgba(0,0,0,0.08)";
+        ctx.fill();
+      }
+    } else {
+      // Process dots with wave interactions
+      for (let i = 0; i < pointsLength; i++) {
+        const p = points[i];
+        let dx = 0,
+          dy = 0;
 
-        // gaussian ring centered at radius r with smoother falloff
-        const diff = dist - r;
-        const gaussian = Math.exp(-(diff * diff) / (2 * (w.sigma * w.sigma)));
+        // OPTIMIZATION: Process waves with early exit and caching
+        for (let j = 0; j < wavesLength; j++) {
+          const w = activeWaves[j];
+          const age = (tNow - w.created) * 0.001; // Convert to seconds
 
-        // direction away from center for push
-        if (dist > 0.0001) {
-          const nx = (p.ox - w.x) / dist;
-          const ny = (p.oy - w.y) / dist;
+          // OPTIMIZATION: Early age check
+          if (age > 2.8) {
+            returnWave(w);
+            j--; // Adjust index after removal
+            continue;
+          }
 
-          // Improved strength calculation with smoother decay
-          const ageDecay = Math.pow(1 / (1 + age * 1.5), 2); // Smoother decay curve
-          const strength = w.power * gaussian * ageDecay;
+          const r = age * (w.speed * 400);
 
-          // Reduced scale factors and added subtle damping for stability
-          const dampingFactor = 0.85; // Reduces jitter
-          dx += nx * strength * 15 * dampingFactor; // Reduced from 18
-          dy += ny * strength * 8 * dampingFactor; // Reduced from 10
+          // OPTIMIZATION: Fast distance calculation with early exit
+          const deltaX = p.ox - w.x;
+          const deltaY = p.oy - w.y;
+          const distSq = deltaX * deltaX + deltaY * deltaY;
+          const dist = Math.sqrt(distSq);
+
+          // OPTIMIZATION: Early exit for distant points
+          const maxInfluenceRadius = r + w.sigma * 3;
+          if (dist > maxInfluenceRadius) continue;
+
+          perf.mathOps++;
+
+          // OPTIMIZATION: Simplified gaussian calculation using lookup
+          const diff = dist - r;
+          const diffSq = diff * diff;
+          const sigmaVar = 2 * (w.sigma * w.sigma);
+          const gaussian = fastExp(diffSq / sigmaVar);
+
+          // Direction calculation (only if significant influence)
+          if (dist > 0.0001 && gaussian > 0.01) {
+            const invDist = 1 / dist;
+            const nx = deltaX * invDist;
+            const ny = deltaY * invDist;
+
+            // OPTIMIZATION: Simplified strength calculation
+            const ageDecay = 1 / (1 + age * 1.5);
+            const ageDecaySq = ageDecay * ageDecay;
+            const strength = w.power * gaussian * ageDecaySq;
+
+            const dampingFactor = 0.85;
+            dx += nx * strength * 15 * dampingFactor;
+            dy += ny * strength * 8 * dampingFactor;
+          }
         }
-      }
 
-      // Store previous position for smoothing (initialize if needed)
-      if (p.prevX === undefined) {
-        p.prevX = p.ox;
-        p.prevY = p.oy;
-      }
+        // OPTIMIZATION: Reuse previous position smoothing
+        if (p.prevX === undefined) {
+          p.prevX = p.ox;
+          p.prevY = p.oy;
+        }
 
-      // Calculate target position
-      const targetX = p.ox + dx;
-      const targetY = p.oy + dy;
+        const targetX = p.ox + dx;
+        const targetY = p.oy + dy;
 
-      // Smooth interpolation to prevent micro-jitters
-      const smoothFactor = 0.7; // Higher = more responsive, lower = smoother
-      p.prevX += (targetX - p.prevX) * smoothFactor;
-      p.prevY += (targetY - p.prevY) * smoothFactor;
+        const smoothFactor = 0.7;
+        p.prevX += (targetX - p.prevX) * smoothFactor;
+        p.prevY += (targetY - p.prevY) * smoothFactor;
 
-      const drawX = p.prevX;
-      const drawY = p.prevY;
+        const drawX = p.prevX;
+        const drawY = p.prevY;
 
-      // size modulation by cumulative influence (optional)
-      const influence = Math.min(1, Math.hypot(dx, dy) / 6);
-      const radius = dotRadius + influence * 2;
+        // OPTIMIZATION: Simplified influence calculation
+        const influence = Math.min(1, Math.sqrt(dx * dx + dy * dy) * 0.16667); // 1/6
+        const radius = dotRadius + influence * 2;
 
-      ctx.beginPath();
-      ctx.arc(drawX, drawY, radius, 0, Math.PI * 2);
+        ctx.beginPath();
+        ctx.arc(drawX, drawY, radius, 0, Math.PI * 2);
 
-      // Aurora color transition based on influence
-      const darkMode = isDarkMode();
+        // OPTIMIZATION: Simplified color calculation
+        const darkMode = isDarkMode();
 
-      if (influence < 0.1) {
-        // Static dots - adapt to theme
-        if (darkMode) {
-          ctx.fillStyle = `rgba(255,255,255,${0.06 + influence * 0.12})`;
+        if (influence < 0.1) {
+          ctx.fillStyle = darkMode
+            ? `rgba(255,255,255,${0.06 + influence * 0.12})`
+            : `rgba(0,0,0,${0.08 + influence * 0.16})`;
         } else {
-          ctx.fillStyle = `rgba(0,0,0,${0.08 + influence * 0.16})`;
-        }
-      } else {
-        // Animated dots - aurora gradient colors (enhanced for dark mode)
-        const normalizedInfluence = influence;
+          // OPTIMIZATION: Simplified aurora colors with fewer branches
+          const t = Math.min(influence * 4, 3.99); // 0-3.99 range
+          const segment = Math.floor(t);
+          const localT = t - segment;
 
-        if (normalizedInfluence < 0.25) {
-          // Deep blue to electric blue
-          const t = normalizedInfluence / 0.25;
+          let r, g, b, alpha;
+
           if (darkMode) {
-            const r = Math.round(60 + (100 - 60) * t);
-            const g = Math.round(120 + (200 - 120) * t);
-            const b = Math.round(200 + (255 - 200) * t);
-            const alpha = 0.6 + normalizedInfluence * 0.3;
-            ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
+            switch (segment) {
+              case 0: // Deep blue to electric blue
+                r = 60 + (100 - 60) * localT;
+                g = 120 + (200 - 120) * localT;
+                b = 200 + (255 - 200) * localT;
+                alpha = 0.6 + influence * 0.3;
+                break;
+              case 1: // Electric blue to cyan
+                r = 100 + (150 - 100) * localT;
+                g = 200 + (255 - 200) * localT;
+                b = 255;
+                alpha = 0.7 + influence * 0.2;
+                break;
+              case 2: // Cyan to green
+                r = 150 + (180 - 150) * localT;
+                g = 255;
+                b = 255 + (220 - 255) * localT;
+                alpha = 0.8 + influence * 0.15;
+                break;
+              default: // Green to golden
+                r = 180 + (255 - 180) * localT;
+                g = 255 + (180 - 255) * localT;
+                b = 220 + (50 - 220) * localT;
+                alpha = 0.85 + influence * 0.15;
+            }
           } else {
-            const r = Math.round(20 + (0 - 20) * t);
-            const g = Math.round(50 + (150 - 50) * t);
-            const b = Math.round(120 + (255 - 120) * t);
-            const alpha = 0.5 + normalizedInfluence * 0.3;
-            ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
+            switch (segment) {
+              case 0:
+                r = 20 * (1 - localT);
+                g = 50 + (150 - 50) * localT;
+                b = 120 + (255 - 120) * localT;
+                alpha = 0.5 + influence * 0.3;
+                break;
+              case 1:
+                r = 0;
+                g = 150 + (255 - 150) * localT;
+                b = 255;
+                alpha = 0.6 + influence * 0.2;
+                break;
+              case 2:
+                r = 100 * localT;
+                g = 255;
+                b = 255 + (200 - 255) * localT;
+                alpha = 0.7 + influence * 0.2;
+                break;
+              default:
+                r = 100 + (255 - 100) * localT;
+                g = 255 + (140 - 255) * localT;
+                b = 200 * (1 - localT);
+                alpha = 0.8 + influence * 0.2;
+            }
           }
-        } else if (normalizedInfluence < 0.5) {
-          // Electric blue to cyan
-          const t = (normalizedInfluence - 0.25) / 0.25;
-          if (darkMode) {
-            const r = Math.round(100 + (150 - 100) * t);
-            const g = Math.round(200 + (255 - 200) * t);
-            const b = 255;
-            const alpha = 0.7 + normalizedInfluence * 0.2;
-            ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
-          } else {
-            const r = Math.round(0 + (0 - 0) * t);
-            const g = Math.round(150 + (255 - 150) * t);
-            const b = 255;
-            const alpha = 0.6 + normalizedInfluence * 0.2;
-            ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
-          }
-        } else if (normalizedInfluence < 0.75) {
-          // Cyan to green aurora
-          const t = (normalizedInfluence - 0.5) / 0.25;
-          if (darkMode) {
-            const r = Math.round(150 + (180 - 150) * t);
-            const g = 255;
-            const b = Math.round(255 + (220 - 255) * t);
-            const alpha = 0.8 + normalizedInfluence * 0.15;
-            ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
-          } else {
-            const r = Math.round(0 + (100 - 0) * t);
-            const g = 255;
-            const b = Math.round(255 + (200 - 255) * t);
-            const alpha = 0.7 + normalizedInfluence * 0.2;
-            ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
-          }
-        } else {
-          // Green to golden orange aurora (highest intensity)
-          const t = (normalizedInfluence - 0.75) / 0.25;
-          if (darkMode) {
-            const r = Math.round(180 + (255 - 180) * t);
-            const g = Math.round(255 + (180 - 255) * t);
-            const b = Math.round(220 + (50 - 220) * t);
-            const alpha = 0.85 + normalizedInfluence * 0.15;
-            ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
-          } else {
-            const r = Math.round(100 + (255 - 100) * t);
-            const g = Math.round(255 + (140 - 255) * t);
-            const b = Math.round(200 + (0 - 200) * t);
-            const alpha = 0.8 + normalizedInfluence * 0.2;
-            ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
-          }
+
+          ctx.fillStyle = `rgba(${Math.round(r)},${Math.round(g)},${Math.round(
+            b
+          )},${alpha})`;
         }
+
+        ctx.fill();
       }
-
-      ctx.fill();
     }
 
-    // decay old waves with smoother cleanup
-    for (let k = waves.length - 1; k >= 0; k--) {
-      const w = waves[k];
-      const age = (tNow - w.created) / 1000;
+    // OPTIMIZATION: Performance tracking
+    perf.frameCount++;
+    const frameEnd = performance.now();
+    perf.frameTime = frameEnd - frameStart;
 
-      // Longer lifetime for smoother transitions
-      if (age > 2.8) {
-        waves.splice(k, 1);
+    if (frameEnd - perf.lastTime >= 1000) {
+      perf.fps = perf.frameCount;
+      perf.frameCount = 0;
+      perf.lastTime = frameEnd;
+
+      // Log performance data for debugging
+      if (window.location.hash === "#debug") {
+        console.log(
+          `FPS: ${perf.fps}, Frame Time: ${perf.frameTime.toFixed(
+            2
+          )}ms, Math Ops: ${perf.mathOps}, Active Waves: ${activeWaves.length}`
+        );
       }
     }
 
@@ -426,7 +543,7 @@
     }
   }
 
-  // expose simple API for customization (optional)
+  // expose simple API for customization + performance monitoring
   window._dotGridBG = {
     pushWave,
     setSpacing(s) {
@@ -437,5 +554,29 @@
       dotRadius = r;
     },
     isDarkMode,
+    // Performance monitoring API
+    getPerformance() {
+      return {
+        fps: perf.fps,
+        frameTime: perf.frameTime,
+        mathOps: perf.mathOps,
+        activeWaves: activeWaves.length,
+        poolUtilization:
+          (
+            ((WAVE_POOL_SIZE - wavePool.filter((w) => !w.inUse).length) /
+              WAVE_POOL_SIZE) *
+            100
+          ).toFixed(1) + "%",
+        runtime: ((performance.now() - perf.startTime) / 1000).toFixed(1) + "s",
+      };
+    },
+    // Debug toggle
+    toggleDebug() {
+      if (window.location.hash === "#debug") {
+        window.location.hash = "";
+      } else {
+        window.location.hash = "#debug";
+      }
+    },
   };
 })();
