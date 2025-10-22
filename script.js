@@ -76,33 +76,39 @@
   let smoothMouseY = 0;
   let mouseMoving = false;
   let moveTimeout = null;
+  let isTouching = false;
 
+  // Detect if device supports touch
+  const isTouchDevice =
+    "ontouchstart" in window || navigator.maxTouchPoints > 0;
+
+  // Enhanced pointer move handler for both mouse and touch
   window.addEventListener(
     "pointermove",
     (e) => {
       const now = performance.now();
 
-      // Calculate mouse velocity for adaptive behavior
+      // Calculate velocity for adaptive behavior
       const deltaX = e.clientX - lastMouseX;
       const deltaY = e.clientY - lastMouseY;
       const velocity = Math.hypot(deltaX, deltaY);
 
-      // Update smooth mouse position with interpolation
-      const lerpFactor = 0.3; // Smoothing factor (0 = no smoothing, 1 = instant)
+      // Update smooth position with interpolation
+      const lerpFactor = 0.3;
       smoothMouseX += (e.clientX - smoothMouseX) * lerpFactor;
       smoothMouseY += (e.clientY - smoothMouseY) * lerpFactor;
 
-      // Adaptive throttling based on velocity
-      const baseThrottle = 35;
-      const velocityThrottle = Math.max(15, baseThrottle - velocity * 0.5);
+      // Adaptive throttling (more responsive on touch devices)
+      const baseThrottle = isTouchDevice ? 25 : 35;
+      const velocityThrottle = Math.max(10, baseThrottle - velocity * 0.5);
 
-      // Create waves more consistently, especially for slow movements
+      // Create waves more consistently
       if (now - lastMove > velocityThrottle) {
-        // Use smoothed position for more stable waves
+        const powerMultiplier = isTouchDevice ? 1.1 : 1.0;
         pushWave(
           smoothMouseX,
           smoothMouseY,
-          Math.min(1.2, 0.7 + velocity * 0.01)
+          Math.min(1.3, (0.7 + velocity * 0.01) * powerMultiplier)
         );
         lastMove = now;
       }
@@ -120,10 +126,57 @@
     { passive: true }
   );
 
-  // click / touch stronger wave
+  // Enhanced touch/click handlers
   window.addEventListener("pointerdown", (e) => {
-    pushWave(e.clientX, e.clientY, 1.8);
+    isTouching = true;
+    const powerBoost = e.pointerType === "touch" ? 2.0 : 1.8;
+    pushWave(e.clientX, e.clientY, powerBoost);
   });
+
+  window.addEventListener("pointerup", (e) => {
+    isTouching = false;
+  });
+
+  // Additional touch-specific handlers for better mobile experience
+  if (isTouchDevice) {
+    // Prevent scrolling when touching the canvas
+    canvas.addEventListener(
+      "touchstart",
+      (e) => {
+        e.preventDefault();
+      },
+      { passive: false }
+    );
+
+    canvas.addEventListener(
+      "touchmove",
+      (e) => {
+        e.preventDefault();
+        // The pointermove handler above will handle the wave generation
+      },
+      { passive: false }
+    );
+
+    canvas.addEventListener(
+      "touchend",
+      (e) => {
+        e.preventDefault();
+      },
+      { passive: false }
+    );
+
+    // Handle multiple touches (multi-touch)
+    canvas.addEventListener(
+      "touchstart",
+      (e) => {
+        for (let i = 0; i < e.touches.length; i++) {
+          const touch = e.touches[i];
+          pushWave(touch.clientX, touch.clientY, 2.2);
+        }
+      },
+      { passive: false }
+    );
+  }
 
   // main draw loop
   function draw() {
