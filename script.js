@@ -13,7 +13,11 @@
     startTime: performance.now(),
   };
 
-  let DPR = Math.min(window.devicePixelRatio || 1, 2);
+  let DPR = 1;
+  const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+  if (!isSafari) DPR = Math.min(window.devicePixelRatio || 1, 2);
+
+  // let DPR = 1;
   let width = 0,
     height = 0;
 
@@ -40,6 +44,95 @@
     if (x >= EXP_TABLE_MAX) return 0;
     const index = Math.floor((x / EXP_TABLE_MAX) * EXP_TABLE_SIZE);
     return expLookup[Math.min(index, EXP_TABLE_SIZE - 1)];
+  }
+
+  // OPTIMIZATION: Pre-computed color palettes to avoid string creation in loops
+  const COLOR_PALETTE_SIZE = 400; // 100 influence levels * 4 segments
+  const darkModeColors = new Array(COLOR_PALETTE_SIZE);
+  const lightModeColors = new Array(COLOR_PALETTE_SIZE);
+  const lowInfluenceDarkColors = new Array(100);
+  const lowInfluenceLightColors = new Array(100);
+
+  // Pre-generate all possible colors
+  function initializeColorPalettes() {
+    // Low influence colors (influence < 0.1)
+    for (let i = 0; i < 100; i++) {
+      const influence = i / 1000; // 0 to 0.099
+      lowInfluenceDarkColors[i] = `rgba(255,255,255,${
+        0.06 + influence * 0.12
+      })`;
+      lowInfluenceLightColors[i] = `rgba(0,0,0,${0.08 + influence * 0.16})`;
+    }
+
+    // High influence colors (influence >= 0.1)
+    for (let i = 0; i < COLOR_PALETTE_SIZE; i++) {
+      const influence = 0.1 + (i / COLOR_PALETTE_SIZE) * 0.9; // 0.1 to 1.0
+      const t = Math.min(influence * 4, 3.99);
+      const segment = Math.floor(t);
+      const localT = t - segment;
+
+      let r, g, b, alpha;
+
+      // Dark mode colors
+      switch (segment) {
+        case 0:
+          r = 60 + (100 - 60) * localT;
+          g = 120 + (200 - 120) * localT;
+          b = 200 + (255 - 200) * localT;
+          alpha = 0.6 + influence * 0.3;
+          break;
+        case 1:
+          r = 100 + (150 - 100) * localT;
+          g = 200 + (255 - 200) * localT;
+          b = 255;
+          alpha = 0.7 + influence * 0.2;
+          break;
+        case 2:
+          r = 150 + (180 - 150) * localT;
+          g = 255;
+          b = 255 + (220 - 255) * localT;
+          alpha = 0.8 + influence * 0.15;
+          break;
+        default:
+          r = 180 + (255 - 180) * localT;
+          g = 255 + (180 - 255) * localT;
+          b = 220 + (50 - 220) * localT;
+          alpha = 0.85 + influence * 0.15;
+      }
+      darkModeColors[i] = `rgba(${Math.round(r)},${Math.round(g)},${Math.round(
+        b
+      )},${alpha})`;
+
+      // Light mode colors
+      switch (segment) {
+        case 0:
+          r = 20 * (1 - localT);
+          g = 50 + (150 - 50) * localT;
+          b = 120 + (255 - 120) * localT;
+          alpha = 0.5 + influence * 0.3;
+          break;
+        case 1:
+          r = 0;
+          g = 150 + (255 - 150) * localT;
+          b = 255;
+          alpha = 0.6 + influence * 0.2;
+          break;
+        case 2:
+          r = 100 * localT;
+          g = 255;
+          b = 255 + (200 - 255) * localT;
+          alpha = 0.7 + influence * 0.2;
+          break;
+        default:
+          r = 100 + (255 - 100) * localT;
+          g = 255 + (140 - 255) * localT;
+          b = 200 * (1 - localT);
+          alpha = 0.8 + influence * 0.2;
+      }
+      lightModeColors[i] = `rgba(${Math.round(r)},${Math.round(g)},${Math.round(
+        b
+      )},${alpha})`;
+    }
   }
 
   // OPTIMIZATION: Object pooling for waves
@@ -124,6 +217,9 @@
         points.push({ x, y, ox: x, oy: y });
       }
     }
+
+    // Initialize color palettes
+    initializeColorPalettes();
   }
 
   // OPTIMIZATION: Optimized wave creation with pooling
@@ -262,31 +358,37 @@
 
     // Pre-calculate common values
     const pointsLength = points.length;
-    const wavesLength = activeWaves.length;
 
-    // OPTIMIZATION: Early exit if no waves
-    if (wavesLength === 0) {
-      // Draw static dots only
+    // OPTIMIZATION: Check if we have active waves (check dynamically, not cached)
+    if (activeWaves.length === 0) {
+      // Draw static dots only (no movement, so show all dots)
+      const darkMode = isDarkMode();
+      const staticColor = darkMode
+        ? "rgba(255,255,255,0.06)"
+        : "rgba(0,0,0,0.08)";
+
+      // SAFARI OPTIMIZATION: Batch all static dots into a single path
+      ctx.beginPath();
       for (let i = 0; i < pointsLength; i++) {
         const p = points[i];
-        ctx.beginPath();
+        ctx.moveTo(p.ox + dotRadius, p.oy);
         ctx.arc(p.ox, p.oy, dotRadius, 0, Math.PI * 2);
-
-        const darkMode = isDarkMode();
-        ctx.fillStyle = darkMode
-          ? "rgba(255,255,255,0.06)"
-          : "rgba(0,0,0,0.08)";
-        ctx.fill();
       }
+      ctx.fillStyle = staticColor;
+      ctx.fill();
     } else {
-      // Process dots with wave interactions
+      // SAFARI OPTIMIZATION: Process dots with wave interactions
+      // Store dot data for batched rendering
+      const dotData = [];
+      const darkMode = isDarkMode();
+
       for (let i = 0; i < pointsLength; i++) {
         const p = points[i];
         let dx = 0,
           dy = 0;
 
         // OPTIMIZATION: Process waves with early exit and caching
-        for (let j = 0; j < wavesLength; j++) {
+        for (let j = 0; j < activeWaves.length; j++) {
           const w = activeWaves[j];
           const age = (tNow - w.created) * 0.001; // Convert to seconds
 
@@ -354,83 +456,58 @@
         const influence = Math.min(1, Math.sqrt(dx * dx + dy * dy) * 0.16667); // 1/6
         const radius = dotRadius + influence * 2;
 
-        ctx.beginPath();
-        ctx.arc(drawX, drawY, radius, 0, Math.PI * 2);
+        // Store dot data for batched rendering
+        let colorKey;
+        let color;
 
-        // OPTIMIZATION: Simplified color calculation
-        const darkMode = isDarkMode();
-
-        if (influence < 0.1) {
-          ctx.fillStyle = darkMode
-            ? `rgba(255,255,255,${0.06 + influence * 0.12})`
-            : `rgba(0,0,0,${0.08 + influence * 0.16})`;
+        // Always draw dots, even with zero influence (static state)
+        if (influence < 0.01) {
+          // Static dots (no wave influence)
+          colorKey = "static";
+          color = darkMode ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.08)";
+        } else if (influence < 0.1) {
+          // Use low influence palette
+          const index = Math.min(99, Math.floor(influence * 1000));
+          colorKey = `low_${index}`;
+          color = darkMode
+            ? lowInfluenceDarkColors[index]
+            : lowInfluenceLightColors[index];
         } else {
-          // OPTIMIZATION: Simplified aurora colors with fewer branches
-          const t = Math.min(influence * 4, 3.99); // 0-3.99 range
-          const segment = Math.floor(t);
-          const localT = t - segment;
-
-          let r, g, b, alpha;
-
-          if (darkMode) {
-            switch (segment) {
-              case 0: // Deep blue to electric blue
-                r = 60 + (100 - 60) * localT;
-                g = 120 + (200 - 120) * localT;
-                b = 200 + (255 - 200) * localT;
-                alpha = 0.6 + influence * 0.3;
-                break;
-              case 1: // Electric blue to cyan
-                r = 100 + (150 - 100) * localT;
-                g = 200 + (255 - 200) * localT;
-                b = 255;
-                alpha = 0.7 + influence * 0.2;
-                break;
-              case 2: // Cyan to green
-                r = 150 + (180 - 150) * localT;
-                g = 255;
-                b = 255 + (220 - 255) * localT;
-                alpha = 0.8 + influence * 0.15;
-                break;
-              default: // Green to golden
-                r = 180 + (255 - 180) * localT;
-                g = 255 + (180 - 255) * localT;
-                b = 220 + (50 - 220) * localT;
-                alpha = 0.85 + influence * 0.15;
-            }
-          } else {
-            switch (segment) {
-              case 0:
-                r = 20 * (1 - localT);
-                g = 50 + (150 - 50) * localT;
-                b = 120 + (255 - 120) * localT;
-                alpha = 0.5 + influence * 0.3;
-                break;
-              case 1:
-                r = 0;
-                g = 150 + (255 - 150) * localT;
-                b = 255;
-                alpha = 0.6 + influence * 0.2;
-                break;
-              case 2:
-                r = 100 * localT;
-                g = 255;
-                b = 255 + (200 - 255) * localT;
-                alpha = 0.7 + influence * 0.2;
-                break;
-              default:
-                r = 100 + (255 - 100) * localT;
-                g = 255 + (140 - 255) * localT;
-                b = 200 * (1 - localT);
-                alpha = 0.8 + influence * 0.2;
-            }
-          }
-
-          ctx.fillStyle = `rgba(${Math.round(r)},${Math.round(g)},${Math.round(
-            b
-          )},${alpha})`;
+          // Use high influence palette
+          const index = Math.min(
+            COLOR_PALETTE_SIZE - 1,
+            Math.floor(((influence - 0.1) / 0.9) * COLOR_PALETTE_SIZE)
+          );
+          colorKey = `high_${index}`;
+          color = darkMode ? darkModeColors[index] : lightModeColors[index];
         }
 
+        dotData.push({ x: drawX, y: drawY, radius, color, colorKey });
+      }
+
+      // SAFARI OPTIMIZATION: Batch rendering by color groups
+      // Group dots by color to minimize draw calls
+      const colorGroups = new Map();
+
+      for (let i = 0; i < dotData.length; i++) {
+        const dot = dotData[i];
+        const key = `${dot.colorKey}_${dot.radius.toFixed(1)}`;
+
+        if (!colorGroups.has(key)) {
+          colorGroups.set(key, { color: dot.color, dots: [] });
+        }
+        colorGroups.get(key).dots.push(dot);
+      }
+
+      // Draw each color group in a single path
+      for (const [key, group] of colorGroups) {
+        ctx.beginPath();
+        for (let i = 0; i < group.dots.length; i++) {
+          const dot = group.dots[i];
+          ctx.moveTo(dot.x + dot.radius, dot.y);
+          ctx.arc(dot.x, dot.y, dot.radius, 0, Math.PI * 2);
+        }
+        ctx.fillStyle = group.color;
         ctx.fill();
       }
     }
@@ -444,15 +521,6 @@
       perf.fps = perf.frameCount;
       perf.frameCount = 0;
       perf.lastTime = frameEnd;
-
-      // Log performance data for debugging
-      if (window.location.hash === "#debug") {
-        console.log(
-          `FPS: ${perf.fps}, Frame Time: ${perf.frameTime.toFixed(
-            2
-          )}ms, Math Ops: ${perf.mathOps}, Active Waves: ${activeWaves.length}`
-        );
-      }
     }
 
     requestAnimationFrame(draw);
