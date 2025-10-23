@@ -1,0 +1,33 @@
+// Constants and configuration
+export const CONFIG = {
+  WAVE_POOL_SIZE: 20,
+  EXP_TABLE_SIZE: 2048,
+  EXP_TABLE_MAX: 8.0,
+  COLOR_PALETTE_SIZE: 400,
+  MAX_DPR: 2,
+  BASE_SPACING: 28,
+  MIN_SPACING: 18,
+  MAX_SPACING: 36,
+  DOT_RADIUS: 2.2,
+  WAVE_MAX_AGE: 2.8,
+  WAVE_SPEED_BASE: 1.0,
+  WAVE_SPEED_VARIATION: 0.4,
+  WAVE_SIGMA_MULTIPLIER: 0.7,
+  MAX_ACTIVE_WAVES: 10,
+};
+
+export const THROTTLE = {
+  BASE_MOUSE: 35,
+  BASE_TOUCH: 25,
+  MIN: 10,
+  RESIZE: 120,
+};
+
+export const POWER = {
+  MIN: 0.5,
+  MAX: 1.5,
+  TOUCH_BOOST: 2.0,
+  CLICK_BOOST: 1.8,
+  MULTI_TOUCH: 2.2,
+  TOUCH_MULTIPLIER: 1.1,
+};
