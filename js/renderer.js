@@ -123,11 +123,14 @@ export class Renderer {
       const deltaX = point.ox - w.x;
       const deltaY = point.oy - w.y;
       const distSq = deltaX * deltaX + deltaY * deltaY;
-      const dist = Math.sqrt(distSq);
 
-      // Early exit for distant points
+      // Early exit for distant points using squared distance (avoid sqrt)
       const maxInfluenceRadius = r + w.sigma * 3;
-      if (dist > maxInfluenceRadius) continue;
+      const maxInfluenceRadiusSq = maxInfluenceRadius * maxInfluenceRadius;
+      if (distSq > maxInfluenceRadiusSq) continue;
+
+      // Only calculate sqrt when we know the point is within influence range
+      const dist = Math.sqrt(distSq);
 
       this.performanceMonitor.incrementMathOps();
 
