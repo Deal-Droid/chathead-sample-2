@@ -523,12 +523,12 @@
       perf.lastTime = frameEnd;
     }
 
-    requestAnimationFrame(draw);
+    requestAnimationFrame(draw, canvas);
   }
 
   // initial run
   resize();
-  requestAnimationFrame(draw);
+  requestAnimationFrame(draw, canvas);
 
   // keep responsive
   let resizeTimer = null;
@@ -541,7 +541,7 @@
   const darkModeMediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
   darkModeMediaQuery.addEventListener("change", () => {
     // Redraw when theme changes for immediate visual update
-    requestAnimationFrame(draw);
+    requestAnimationFrame(draw, canvas);
   });
 
   // Additional Safari iOS scroll prevention
